@@ -1,6 +1,10 @@
 
-import unittest, requests
+import unittest
+import requests
 from fpdf import FPDF
+from datetime import datetime
+import json
+from fastapi.applications import FastAPI
 
 class TestReportPDF(FPDF):
     def header(self):
@@ -145,22 +149,77 @@ def generate_simple_report(test_results, filename="test_report.pdf"):
     
 
 
+def generate_api_documentation(app: FastAPI, output_path: str = "README.txt"):
+    """Generate API documentation README file"""
+    try:
+        # Get OpenAPI schema from running server
+        response = requests.get("http://127.0.0.1:8000/openapi.json")
+        openapi_schema = response.json()
+        
+        content = [
+            "API ENDPOINTS DOCUMENTATION",
+            "=" * 30,
+            f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n",
+            "ENDPOINTS:\n"
+        ]
+        
+        for path, methods in openapi_schema["paths"].items():
+            for method, details in methods.items():
+                content.append(f"• {method.upper()} {path}")
+                
+                if "summary" in details:
+                    content.append(f"  Summary: {details['summary']}")
+                
+                if "parameters" in details:
+                    content.append("  Parameters:")
+                    for param in details["parameters"]:
+                        param_info = param.get("schema", {})
+                        content.append(
+                            f"  - {param['name']} ({param['in']}): "
+                            f"{param_info.get('type', '')} "
+                            f"{'(required)' if param.get('required', False) else ''}"
+                        )
+                
+                if "requestBody" in details:
+                    content.append("  Request Body:")
+                    for media_type, schema in details["requestBody"]["content"].items():
+                        if "schema" in schema and "$ref" in schema["schema"]:
+                            ref = schema["schema"]["$ref"].split("/")[-1]
+                            content.append(f"  - {media_type}: {ref}")
+                
+                content.append("")
+        
+        content.extend([
+            "\nAPI DOCUMENTATION:",
+            "=" * 30,
+            "For interactive API documentation, visit:",
+            "1. FastAPI Docs: http://127.0.0.1:8000/docs",
+            "2. ReDoc: http://127.0.0.1:8000/redoc\n",
+            "For the OpenAPI schema: http://127.0.0.1:8000/openapi.json"
+        ])
+        
+        with open(output_path, "w") as f:
+            f.write("\n".join(content))
+        
+        print(f"API documentation generated at {output_path}")
+    except Exception as e:
+        print(f"Failed to generate API documentation: {str(e)}")
+
 if __name__ == '__main__':
-    # Create a test suite
+    # Generate API documentation first
+    # Note: This assumes your FastAPI server is already running
+    generate_api_documentation(None)  # We don't need the app instance since we're querying the live server
+    
+    # Then run tests
     loader = unittest.TestLoader()
     suite = loader.loadTestsFromTestCase(mainUnittest)
-    
-    # Run tests and collect results
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
     
     # Prepare results for PDF
     test_results = {}
-    
-    # Get all test names from the test case class
     test_names = [test._testMethodName for test in loader.loadTestsFromTestCase(mainUnittest)]
     
-    # Check results
     for test_name in test_names:
         if test_name in [fail[0]._testMethodName for fail in result.failures]:
             test_results[test_name] = "FAIL"
@@ -172,5 +231,3 @@ if __name__ == '__main__':
     # Generate PDF report
     generate_simple_report(test_results)
     print("PDF report generated as 'test_report.pdf'")
-
-    unittest.main()
